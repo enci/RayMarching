@@ -1,8 +1,10 @@
 #define EPSILON 0.0001
 #define MAX_STEPS 264
+#define SPEED 5.0
+#define LIGHT_SPEED 10.0
+#define LIGHT_RADIUS 0.6
 
-// Shapes
-
+///// Shapes /////////////////////////////////////////////////////////////////////////////////////////
 float sdRoundBox( vec3 p, vec3 b, float r )
 {
   vec3 d = abs(p) - b;
@@ -42,8 +44,7 @@ float sdCylinderX(vec3 p, vec3 c)
   return length(p.zy-c.xy)-c.z;
 }
 
-// Combine shapes
-
+///// Combine shapes /////////////////////////////////////////////////////////////////////////////////////////
 // The "Stairs" flavour produces n-1 steps of a staircase:
 // much less stupid version by paniq
 float opUnionStairs(float a, float b, float r, float n) {
@@ -59,6 +60,15 @@ void opRepeat(inout float coor, float repeat)
 
 float opSubtraction( float d1, float d2 ) { return max(-d1,d2); }
 
+///// My scene /////////////////////////////////////////////////////////////////////////////////////////
+
+vec4 getLightPos()
+{  
+  float x = iTime * SPEED + 18.0;
+  return vec4(x, sin(iTime) * 2.0 + 3.0, sin(x / 3.14) * 16.0 + 6.0,
+  LIGHT_RADIUS * 0.5 + abs(sin(iTime * LIGHT_SPEED)) * LIGHT_RADIUS * 0.5);
+}
+
 float floorSdf(vec3 pos)
 {
   opRepeat(pos.x, 0.5);
@@ -68,26 +78,15 @@ float floorSdf(vec3 pos)
 
 float ceilingSdf(vec3 pos)
 { 
-  /*
-  float b = sdPlane(pos, vec4(0.0, -1.0, 0.0, 5.0)); 
-  const float repeat = 12.0;
-  opRepeat(pos.x, repeat);
-  opRepeat(pos.z, repeat);
-  float cz = sdCylinderZ(pos - vec3(6.0, 5.0, 6), vec3(0.0, 0.0, 5.0));
-  float cx = sdCylinderX(pos - vec3(6.0, 5.0, 6), vec3(0.0, 0.0, 5.0));
-  float c = min(cz, cx);   
-  //float b = sdBox(pos - vec3(6.0, 11.0, 6.0) , vec3(6.0, 6.0, 6.0));
-  return opSubtraction(c, b);
-  */
-
+  pos -= vec3(6.0, 5.0, 6.0);
+  float b = sdPlane(pos, vec4(0.0, -1.0, 0.0, 0.0)); 
   const float repeat = 6.0;
   opRepeat(pos.x, repeat);
   opRepeat(pos.z, repeat);
-  //float cz = sdCylinderZ(pos /* - vec3(6.0, 5.0, 6)*/, vec3(0.0, 0.0, 5.0));
-  //float cx = sdCylinderX(pos /* - vec3(6.0, 5.0, 6) */, vec3(0.0, 0.0, 5.0));
-  //float c = min(cz, cx);   
-  float b = sdBox(pos - vec3(6.0, 11.0, 6.0), vec3(2.0, 2.0, 2.0));
-  return b;
+  float cz = sdCylinderZ(pos, vec3(0.0, 0.0, 5.0));
+  float cx = sdCylinderX(pos, vec3(0.0, 0.0, 5.0));
+  float c = min(cz, cx);   
+  return opSubtraction(c, b);
 }
 
 float pillarsSdf(vec3 pos)
@@ -96,21 +95,24 @@ float pillarsSdf(vec3 pos)
   opRepeat(pos.x, repeat);
   opRepeat(pos.z, repeat);
 
+  float d = 1.0 / 0.0;
   float pillar = sdBox(pos, vec3(1.0, 5.0, 1.0));
-  float base = sdBox(pos, vec3(1.5, 0.5, 1.5));
-  return opUnionStairs(pillar, base, 0.5, 3.0);
-  //return t;
+  float base = sdBox(pos, vec3(1.5, 0.5, 1.5));  
+  float top = sdBox(pos - vec3(0.0, 4.5, 0.0), vec3(1.25, 0.2, 1.25));
+  d = opUnionStairs(pillar, base, 0.5, 3.0);
+  d = opUnionStairs(d, top, 0.3, 2.0);
+  return d;
 }
-
 
 float sdf(vec3 pos)
 {    
-  float t = 1.0 / 0.0;
-
-  t = floorSdf(pos);
-  t = min(t, pillarsSdf(pos));
-  t = min(t, ceilingSdf(pos));
-  return t;
+  float d = 1.0 / 0.0;
+  d = floorSdf(pos);
+  d = min(d, pillarsSdf(pos));
+  d = min(d, ceilingSdf(pos));
+  vec4 light = getLightPos();
+  d = min(d, sdSphere(pos - light.xyz, light.w));
+  return d;
 }
 
 vec3 getCameraRayDir(vec2 uv, vec3 camPos, vec3 camTarget)
@@ -154,7 +156,6 @@ vec3 calcNormal(vec3 pos)
 {
     // Center sample
     float c = sdf(pos);
-    // Use offset samples to compute gradient / normal
     vec2 eps_zero = vec2(0.001, 0.0);
     return normalize(vec3( sdf(pos + eps_zero.xyy), sdf(pos + eps_zero.yxy), sdf(pos + eps_zero.yyx) ) - c);
 }
@@ -196,37 +197,54 @@ void debugPlane(inout vec3 color, vec3 rayOrigin, vec3 rayDir, float dist)
 
 vec3 render(vec3 rayOrigin, vec3 rayDir)
 { 
-
 	float t = castRay(rayOrigin, rayDir);
-	vec3 L = normalize(vec3(sin(iTime)*1.0, cos(iTime*0.5)+0.5, -0.5));
+
+	//vec3 L = normalize(vec3(sin(iTime)*1.0, cos(iTime*0.5)+0.5, -0.5));
   vec3 color;
+  vec3 backColor = vec3(0.35, 0.35, 0.35);
 
   if (t == -1.0)
   {
-    color = vec3(0.5, 0.5, 0.5);
-    // Skybox color
-    //color = vec3(0.5, 0.5, 0.5) - (rayDir.y * 0.7);      
+    color = backColor;
   }
   else
   {
       vec3 pos = rayOrigin + rayDir * t;
-      vec3 objectSurfaceColour = vec3(0.9, 0.7, 0.7);
+      //vec3 objectSurfaceColour = vec3(0.9, 0.7, 0.7);
+      vec3 objectSurfaceColour = vec3(1.0, 1.0, 1.0);
       vec3 ambient = vec3(0.02, 0.021, 0.02);
       vec3 N = calcNormal(pos);
 
-      // L is vector from surface point to light, N is surface normal. N and L must be normalized!
-      float NoL = max(dot(N, L), 0.0);
-      vec3 LDirectional = vec3(0.9, 0.9, 0.8) * NoL;
-      vec3 LAmbient = vec3(0.03, 0.04, 0.1);
-      vec3 diffuse = objectSurfaceColour * (LDirectional + LAmbient);
-      color = diffuse; // * objectSurfaceColour;
+      vec4 lightInfo = getLightPos();
+      vec3 light = lightInfo.xyz - pos;
+      float d = length(light);
+      vec3 L = normalize(light);
 
-      //color = mix(diffuse, vec3(0.5, 0.5, 0.5), saturate(t / 200.0));      
+      if(d < lightInfo.w * 1.01)
+      {
+        color = vec3(1.0, 1.0, 1.0);        
+      } 
+      else
+      {
+        float intensity = 0.4 + (1.0 + sin( iTime * LIGHT_SPEED * 2.0 )) * 0.0;
+        intensity *= 0.5 / clamp((d * d), 0.0, 1.0);
+        // L is vector from surface point to light, N is surface normal. N and L must be normalized!
+        float NoL = max(dot(N, L), 0.0);
+        vec3 LDirectional = vec3(0.9, 0.9, 0.8) * NoL;
+        vec3 LAmbient = vec3(0.03, 0.04, 0.1);
+
+        float shadowCast = castRay(lightInfo.xyz - L * (lightInfo.w + 0.5), -L);
+        if(shadowCast <= (d - (lightInfo.w + 0.51)))
+          intensity *= 0.3;
+
+        vec3 diffuse = objectSurfaceColour * (LDirectional + LAmbient) * intensity;
+
+        color = mix(diffuse, backColor, saturate(t / 200.0));
+      }
   }
 
   color = pow(color, vec3(0.4545));
-
-  debugPlane(color, rayOrigin, rayDir, t);
+  // debugPlane(color, rayOrigin, rayDir, t);
  	
   return color;
 }
@@ -234,15 +252,28 @@ vec3 render(vec3 rayOrigin, vec3 rayDir)
 vec3 calculateCameraPos()
 {  
   float dist = 10.0;
-  return vec3(sin(iTime * 0.5) * dist, 3.0, cos(iTime * 0.5) * dist);
+  float speed = 0.5;
+  return vec3(iTime * SPEED, 3.0, 6.0);
+  //return vec3(sin(iTime * speed) * dist, 3.0, cos(iTime * speed) * dist);
+}
+
+vec2 barrelDistortion(vec2 uv, float k)
+{
+  float rd = length(uv);    
+  float ru = rd * (1.0 + k * rd * rd);
+  uv /= rd;
+  uv *= ru;
+  return uv;
 }
 
 void main()
 {  
   vec3 cameraPos = calculateCameraPos();
-  vec3 lookAt =  vec3(0.0, 2.0, 0.0);
+  vec3 lookAt =  cameraPos + vec3(10.0, 0.0, 0.0);
 
   vec2 uv = normalizeScreenCoords(gl_FragCoord.xy);  
+  uv = barrelDistortion(uv, 0.25);
+
   vec3 rayDir = getCameraRayDir(uv, cameraPos, lookAt);
     
   vec3 col = render(cameraPos, rayDir);
