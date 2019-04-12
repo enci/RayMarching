@@ -43,7 +43,7 @@ float sdCylinderX(vec3 p, vec3 c)
 
 void opRepeat(inout float coor, float repeat)
 {
-  coor = mod(coor + repeat, repeat * 2.0) - repeat;
+  coor = mod(coor + repeat * 0.5, repeat) - repeat * 0.5;
   //coor = mod(coor, repeat);
 }
 
@@ -60,14 +60,14 @@ float opUnionStairs(float a, float b, float r, float n) {
 
 float floorSdf(vec3 pos)
 {
-  opRepeat(pos.x, 0.5);
-  opRepeat(pos.z, 0.5);
+  opRepeat(pos.x, 1.0);
+  opRepeat(pos.z, 1.0);
   return sdRoundBox(pos, vec3(0.45, 0.1, 0.45), 0.05);
 }
 
 float pillarsSdf(vec3 pos)
 {
-  const float repeat = 6.0;
+  const float repeat = 12.0;
   opRepeat(pos.x, repeat);
   opRepeat(pos.z, repeat);
 
@@ -84,7 +84,7 @@ float ceilingSdf(vec3 pos)
 { 
   pos -= vec3(6.0, 5.0, 6.0);
   float b = sdPlane(pos, vec4(0.0, -1.0, 0.0, 0.0)); 
-  const float repeat = 6.0;
+  const float repeat = 12.0;
   opRepeat(pos.x, repeat);
   opRepeat(pos.z, repeat);
   float cz = sdCylinderZ(pos, vec3(0.0, 0.0, 5.0));
