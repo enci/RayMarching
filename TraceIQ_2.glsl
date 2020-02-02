@@ -327,7 +327,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord)
     vec3 sa = hash( uvec3(x, y, iTime * 10.0) );
     float seed = sa.x; 
     vec3 color = vec3(0.0);
-    const int samples = 64;
+    const int samples = 12;
     for( int i = 0; i < samples; i++)
     {
         color += rendererCalculateColor(ray, 2, seed);

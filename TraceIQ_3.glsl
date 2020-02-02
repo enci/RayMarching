@@ -17,13 +17,14 @@ struct Material
 {
     vec3 color;
     float emmisive;
+    float roughness;
 };
 
 struct Sphere
 {
     vec3 origin;
     float radius;
-    int material;
+    int material;    
 };
 
 struct Camera
@@ -34,59 +35,75 @@ struct Camera
 	vec3 vertical;
 };
 
-/*
-struct Seed
-{
-    float seed;
-};
-*/
-
 // From Lighthouse
-uint RandomInt(inout  uint s) { s ^= s << 13, s ^= s >> 17, s ^= s << 5; return s; }
-float RandomFloat(inout uint s) { return float(RandomInt(s)) * 2.3283064365387e-10; }
+uint RandomInt(inout uint s)
+{
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return s;
+}
+
+float RandomFloat(inout uint s)
+{
+    //return float(RandomInt(s)) * 2.3283064365387e-10;    
+    return fract(float(RandomInt(s)) / 3141.592653);
+}
+
 vec3 RandomVec3(inout uint s)
 {
-    vec3 v = vec3(RandomFloat(s), RandomFloat(s), RandomFloat(s));
-    v *= 2.0;
-    v -= vec3(-1.0);
+    vec3 v = vec3(
+        (RandomFloat(s) - 0.5f) * 2.0,
+        (RandomFloat(s) - 0.5f) * 2.0,
+        (RandomFloat(s) - 0.5f) * 2.0);
+
+    // The line bellow does not work
+    // vec3 v = vec3(
+    //   RandomFloat(s),
+    //   RandomFloat(s),
+    //   RandomFloat(s));
+    // v *= 2.0;
+    // v -= vec3(-0.5, -1.0, -1.0);
     return v;
 }
 
-vec3 RandomUnitShpere(inout uint s)
+vec3 RandomUnitSphere(inout uint s)
 {
-    vec3 v;
-    do
+    vec3 v = vec3(1.0);
+    for(int i = 0; i < 16; i++)
 	{
-		v = RandomVec3(s);
-	} while (length(v) > 1.0);
+        v = RandomVec3(s);
+        if(length(v) <= 1.0)
+            break;
+	}    
+    //return v;
     return normalize(v);
 }
 
-vec3 cosineDirection2(inout uint s, in vec3 nor)
-{
-    return normalize(RandomUnitShpere(s) + nor);
-}
-
-#define MATERIAL_COUNT 5
+#define MATERIAL_COUNT 7
 const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
-	Material(vec3(0.5, 0.5, 0.5), 0.0)                  // Grey
-	, Material(vec3(0.0, 0.7, 0.0), 0.0)                // Green
-    , Material(vec3(1.0, 1.0, 1.0), 0.0)                // White
-    , Material(vec3(1.0, 1.0, 1.0), 1.0)                // Light 
-    , Material(vec3(1.0, 0.0, 1.0), 1.0)                // Light 
+	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey
+	, Material(vec3(0.2, 1.0, 0.2), 1.0, 1.0)                // Green
+    , Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0)                // White
+    , Material(vec3(1.0, 1.0, 1.0), 1.2, 1.0)                // Light 
+    , Material(vec3(1.0, 0.0, 1.0), 0.0, 0.0)                // Pink light 
+    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.3)                // Mirror 
+    , Material(vec3(1.0, 0.2, 0.2), 1.0, 1.0)                // Red
 );
 
-#define SPHERE_COUNT 9
+#define SPHERE_COUNT 11
 const Sphere spheres[SPHERE_COUNT] = Sphere[SPHERE_COUNT](
 	Sphere(vec3(0.0, 2.0, 0.0), 2.0, 0)
 	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, 3)
-    , Sphere(vec3(2.0, 0.5, 2.0), 0.5, 4)
-    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 10006.0, 0.0), 10000.0, 2)
-    , Sphere(vec3(10006.0, 0.0, 0.0), 10000.0, 1)
-    , Sphere(vec3(-10006.0, 0.0, 0.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 0.0, 10006.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 0.0, -10006.0), 10000.0, 3)
+    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, 4)
+    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 2)          // Bottom
+    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, 3)           // Top
+    , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, 1)
+    , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, 6)
+    , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, 2)
+    , Sphere(vec3(0.0, 0.0, -10009.0), 10000.0, 2)
+    , Sphere(vec3(0.0, 1.0, -4.0), 1.0, 5)
+    , Sphere(vec3(-3.0, 0.7, 0.0), 0.7, 2)
 );
 
 const vec3 background = vec3(1.0f, 0.96, 0.92);
@@ -173,23 +190,6 @@ vec3 getColor(in vec3 position, in int objectID)
 {
     int idx = spheres[objectID].material;
     return materials[idx].color;
-
-    /*
-    switch(idx)
-    {
-        case 0 : return vec3(0.2, 0.6, 0.4);
-        case 1 : return vec3(0.7, 0.2, 0.4);
-        case 2 : return vec3(0.2, 0.2, 0.7);
-        case 3 : return vec3(0.2, 0.6, 0.4);
-    }*/
-
-    switch(idx)
-    {
-        case 0 : return vec3(0.0, 0.6, 0.0);
-        case 1 : return vec3(0.7, 0.0, 0.0);
-        case 2 : return vec3(0.0, 0.0, 0.7);
-        case 3 : return vec3(0.2, 0.6, 0.4);
-    }
 }
 
 vec3 getBackground(in vec3 direction)
@@ -259,14 +259,24 @@ vec3 applyLighting(in vec3 position, in vec3 normal, int objectID)
     return vec3(max(dot(normal, light), 0.0));
 }
 
-vec3 getBRDFRay(in vec3 position, in vec3 normal, int objectID, float seed)
-{
-    return cosineDirection(seed, normal);
-}
+vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID, uint seed)
+{    
+    vec3 ref = reflect(incident, normal);
+    Sphere sphere = spheres[objectID];
+    Material material = materials[sphere.material];
+    return normalize(RandomUnitSphere(seed) * material.roughness + ref);
+
+    //return normalize(RandomUnitSphere(seed) + normal);
+
+    //return RandomVec3(seed);
+    // return RandomUnitSphere(seed);  
+    return ref;
+    //return cosineDirection2(seed, normal);
+    }
 
 
 // create light paths iteratively
-vec3 rendererCalculateColor(Ray ray, in int bounces, float seed)
+vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
 {
     vec3 accumulator = vec3(0.0);  // accumulator - should get brighter
     vec3 mask = vec3(1.0);  // mask - should get darker
@@ -277,7 +287,7 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, float seed)
         Intersection intersection = intersect(ray);
         
         // if nothing found, return background color or break
-        if(intersection.distance <= 0.0) 
+        if(intersection.distance <= 0.01) 
             break;
         
         // get position and normal at the intersection point
@@ -290,11 +300,11 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, float seed)
         // compute direct lighting
         //vec3 dcol = applyLighting(pos, nor, intersection.objectID);
         // tcol = dcol;
-        vec3 emmisive = material.emmisive * material.color; // (pos, nor, intersection.objectID);
+        vec3 emmisive = material.emmisive * material.color;
 
         // prepare ray for indirect lighting gathering
-        ray.origin = pos;
-        ray.direction = getBRDFRay(pos, nor, intersection.objectID, seed);
+        ray.origin = pos + nor * 0.01;
+        ray.direction = getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
 
         // surface * lighting
         mask *= material.color;
@@ -317,28 +327,33 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord)
 
     Camera camera = MakeCamera(
         vec3(cx, cy, cz),
-        vec3(0.0, 0.0, 0.0),
-        vec3(0.0, 1.0, 0.0),
+        vec3(0.0, 2.0, 0.0),
+        vec3(0.0, 0.1, 0.0),
         60.0, 1.6);
 
     Ray ray = MakeRay(camera, x / width, 1.0 - (y / height));
 
-    //float sa = hash( dot( fragCoord, vec2(12.9898, 78.233) ) + 1113.1*float(iFrame) );
-    vec3 sa = hash( uvec3(x, y, iTime * 10.0) );
-    uint s = uint(x) * uint(width) + uint(y); 
+    vec3 sa = hash( uvec3(x, y, iTime * 100.0) );
 
-    vec3 color = vec3(0.0); //s / (width * height));
+    //uint seed = (uint(x) + uint(y) * uint(width)) ^ uint(iTime * 10000000.0);
 
-    /*
-    float seed = sa.x; 
+    uint seed = uint(sa.x * 1000.0);
+
+    //float f = float(RandomVec3(seed).y >= 1.0);
+    //vec3 color = vec3(f);
+    //vec3 color = (RandomVec3(seed) + vec3(1.0)) * 0.5;
+    //vec3 color = RandomVec3(seed);
+    // vec3 r = RandomUnitSphere(seed);
+    //vec3 color = vec3(abs(length(r)) - 1.0 < 0.01);
+
+    vec3 color = vec3(0.0);
     const int samples = 64;
     for( int i = 0; i < samples; i++)
     {
-        color += rendererCalculateColor(ray, 2, seed);
-        seed += 1.0;
+        color += rendererCalculateColor(ray, 3, seed);
+        seed += uint(hash(float(i)) * 100.0);
     }
     color /= float(samples);
-    */
 
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(pow(color, vec3(0.45)), 1.0);
 }
