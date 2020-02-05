@@ -1,6 +1,9 @@
 #version 430 core
 #define FLT_MAX 1000000000.0
 #define EPSILON 0.001
+#define SLOPE_EPSILON 0.001
+#define SAMPLES 64
+#define BOUNCES 4
 
 struct Intersection
 {
@@ -85,7 +88,7 @@ vec3 RandomUnitSphere(inout uint s)
 
 #define MATERIAL_COUNT 7
 const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
-	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey
+	Material(vec3(0.5, 0.5, 0.5), 0.0, 0.0)                  // Grey
 	, Material(vec3(0.2, 1.0, 0.2), 0.0, 1.0)                // Green
     , Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0)                // White
     , Material(vec3(1.0, 1.0, 1.0), 1.2, 1.0)                // Light 
@@ -262,20 +265,23 @@ vec3 applyLighting(in vec3 position, in vec3 normal, int objectID)
     return vec3(max(dot(normal, light), 0.0));
 }
 
-vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID, uint seed)
+vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID, inout uint seed)
 {    
     vec3 ref = reflect(incident, normal);
     Sphere sphere = spheres[objectID];
     Material material = materials[sphere.material];
     return normalize(RandomUnitSphere(seed) * material.roughness + ref);
-
-    //return normalize(RandomUnitSphere(seed) + normal);
-
-    //return RandomVec3(seed);
-    // return RandomUnitSphere(seed);  
+  
     return ref;
-    //return cosineDirection2(seed, normal);
-    }
+}
+
+vec3 GetHemisphereVector(in vec3 normal, inout uint seed)
+{
+    vec3 r = RandomUnitSphere(seed);
+    if(dot(normal, r) < 0.0)
+        return -r;
+    return r;
+}
 
 
 // create light paths iteratively
@@ -295,23 +301,27 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
         
         // get position and normal at the intersection point
         vec3 pos = ray.origin + ray.direction * intersection.distance;
-        vec3 nor = getNormal(pos, intersection.objectID);
+        vec3 normal = getNormal(pos, intersection.objectID);
         
         // get color for the surface
         Material material = getMaterial(pos, intersection.objectID);
 
         // compute direct lighting
-        //vec3 dcol = applyLighting(pos, nor, intersection.objectID);
-        // tcol = dcol;
         vec3 emmisive = material.emmisive * material.color;
 
+        float ND = dot(ray.direction, normal);
+
         // prepare ray for indirect lighting gathering
-        ray.origin = pos + nor * 0.01;
-        ray.direction = getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
+        ray.origin = pos + normal * 0.01;
+        //ray.direction = GetHemisphereVector(normal, seed); //getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
+        ray.direction = getBRDFRay(pos, normal, ray.direction, intersection.objectID, seed);
+
+        //float ND = dot(ray.direction, normal);
 
         // surface * lighting
-        mask *= material.color;
+        mask *= material.color; // * ND * (4.0 / 3.14);
         accumulator += mask * emmisive;
+        //mask *= material.color * ND * (4.0 / 3.14);
     }
 
     return accumulator;
@@ -339,16 +349,16 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord)
     seed = WangHash(seed);
 
     vec3 color = vec3(0.0);
-    const int samples = 128;
-    for( int i = 0; i < samples; i++)
+    //const int samples = 32;
+    for( int i = 0; i < SAMPLES; i++)
     {
         float xs = x + RandomFloat(seed) + 0.5;
         float ys = y + RandomFloat(seed) + 0.5;
         Ray ray = MakeRay(camera, xs / width, 1.0 - (ys / height));
-        color += rendererCalculateColor(ray, 4, seed);
+        color += rendererCalculateColor(ray, BOUNCES, seed);
         seed += uint(hash(float(i)) * 100.0);
     }
-    color /= float(samples);
+    color /= float(SAMPLES);
 
     fragColor = vec4(pow(color, vec3(0.45)), 1.0);
 }

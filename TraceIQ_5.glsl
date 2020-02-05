@@ -1,6 +1,123 @@
 #version 430 core
 #define FLT_MAX 1000000000.0
 #define EPSILON 0.001
+#define SLOPE_EPSILON 0.001
+#define SAMPLES 64
+#define BOUNCES 4
+
+////////////////////////////////////////////////////////////////////////////////
+// Simplex Noise
+////////////////////////////////////////////////////////////////////////////////
+
+float randFancy(vec2 co)
+{
+    highp float a = 12.9898;
+    highp float b = 78.233;
+    highp float c = 43758.5453;
+    highp float dt= dot(co.xy ,vec2(a,b));
+    highp float sn= mod(dt,3.14);
+    return fract(sin(sn) * c);
+}
+
+float rand3D(in vec3 co)
+{
+    return fract(sin(dot(co.xyz ,vec3(12.9898,78.233,144.7272))) * 43758.5453);
+}
+
+vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
+vec3 fade(vec3 t) {return t*t*t*(t*(t*6.0-15.0)+10.0);}
+vec4 fade(vec4 t) {return t*t*t*(t*(t*6.0-15.0)+10.0);}
+
+//	Simplex 3D Noise
+//	by Ian McEwan, Ashima Arts
+//
+float snoise(in vec3 v)
+{
+  const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+  const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+
+// First corner
+  vec3 i  = floor(v + dot(v, C.yyy) );
+  vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+// Other corners
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min( g.xyz, l.zxy );
+  vec3 i2 = max( g.xyz, l.zxy );
+
+  //  x0 = x0 - 0. + 0.0 * C
+  vec3 x1 = x0 - i1 + 1.0 * C.xxx;
+  vec3 x2 = x0 - i2 + 2.0 * C.xxx;
+  vec3 x3 = x0 - 1. + 3.0 * C.xxx;
+
+// Permutations
+  i = mod(i, 289.0 );
+  vec4 p = permute( permute( permute(
+             i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+           + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+           + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+
+// Gradients
+// ( N*N points uniformly over a square, mapped onto an octahedron.)
+  float n_ = 1.0/7.0; // N=7
+  vec3  ns = n_ * D.wyz - D.xzx;
+
+  vec4 j = p - 49.0 * floor(p * ns.z *ns.z);  //  mod(p,N*N)
+
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+  vec4 x = x_ *ns.x + ns.yyyy;
+  vec4 y = y_ *ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+
+  vec4 b0 = vec4( x.xy, y.xy );
+  vec4 b1 = vec4( x.zw, y.zw );
+
+  vec4 s0 = floor(b0)*2.0 + 1.0;
+  vec4 s1 = floor(b1)*2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+  vec3 p0 = vec3(a0.xy,h.x);
+  vec3 p1 = vec3(a0.zw,h.y);
+  vec3 p2 = vec3(a1.xy,h.z);
+  vec3 p3 = vec3(a1.zw,h.w);
+
+//Normalise gradients
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+  p0 *= norm.x;
+  p1 *= norm.y;
+  p2 *= norm.z;
+  p3 *= norm.w;
+
+// Mix final noise value
+  vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+  m = m * m;
+  return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1),
+                                dot(p2,x2), dot(p3,x3) ) );
+}
+//	Simplex 4D Noise
+//	by Ian McEwan, Ashima Arts
+//
+float permute(float x){return floor(mod(((x*34.0)+1.0)*x, 289.0));}
+float taylorInvSqrt(float r){return 1.79284291400159 - 0.85373472095314 * r;}
+
+vec4 grad4(float j, vec4 ip){
+  const vec4 ones = vec4(1.0, 1.0, 1.0, -1.0);
+  vec4 p,s;
+
+  p.xyz = floor( fract (vec3(j) * ip.xyz) * 7.0) * ip.z - 1.0;
+  p.w = 1.5 - dot(abs(p.xyz), ones.xyz);
+  s = vec4(lessThan(p, vec4(0.0)));
+  p.xyz = p.xyz + (s.xyz*2.0 - 1.0) * s.www;
+
+  return p;
+}
 
 struct Intersection
 {
@@ -25,6 +142,13 @@ struct Sphere
 {
     vec3 origin;
     float radius;
+    int material;    
+};
+
+struct Box
+{
+    vec3 origin;
+    vec3 extent;
     int material;    
 };
 
@@ -83,24 +207,27 @@ vec3 RandomUnitSphere(inout uint s)
     return normalize(v);
 }
 
-#define MATERIAL_COUNT 7
+#define MATERIAL_COUNT 10
 const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
-	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey
-	, Material(vec3(0.2, 1.0, 0.2), 0.0, 1.0)                // Green
-    , Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0)                // White
-    , Material(vec3(1.0, 1.0, 1.0), 1.2, 1.0)                // Light 
-    , Material(vec3(1.0, 0.0, 1.0), 0.0, 0.0)                // Pink light 
-    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.3)                // Mirror 
-    , Material(vec3(1.0, 0.2, 0.2), 0.0, 1.0)                // Red
+	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey    0
+	, Material(vec3(1.20, 1.0, 1.0), 1.0, 1.0)                // Green   1
+    , Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0)                // White   2
+    , Material(vec3(1.0, 1.0, 1.0), 2.6, 1.0)                // Light   3
+    , Material(vec3(1.0, 0.0, 1.0), 1.0, 0.0)                // Pink    4
+    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.3)                // Mirror  5    
+    , Material(vec3(1.0, 0.2, 0.2), 0.0, 1.0)                // Red     6
+    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.0)                // Grey    7
+    , Material(vec3(0.0, 0.0, 1.0), 4.9, 1.0)                // Orange  8
+    , Material(vec3(1.0, 0.6, 0.0), 5.0, 1.0)                // Blue    9
 );
 
 #define SPHERE_COUNT 11
 const Sphere spheres[SPHERE_COUNT] = Sphere[SPHERE_COUNT](
-	Sphere(vec3(0.0, 2.0, 0.0), 2.0, 0)
-	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, 3)
-    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, 4)
-    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 2)          // Bottom
-    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, 3)           // Top
+	Sphere(vec3(0.0, 2.0, 0.0), 2.0, 0)                     // Big middle
+	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, 2)                   
+    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, 9)                   // 
+    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 7)          // Bottom
+    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, 2)           // Top
     , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, 1)
     , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, 6)
     , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, 2)
@@ -186,6 +313,32 @@ vec3 getNormal(in vec3 position, in int objectID)
 Material getMaterial(in vec3 position, in int objectID)
 {
     int idx = spheres[objectID].material;
+    if(idx == 0)
+    {
+        if(sin((position.y + position.z + iTime * 0.9) * 12.0) < 0.5)
+            return materials[5];
+        else
+            return materials[3];
+    }    
+    if(idx == 1)
+    {
+        if(rand3D(round(position + vec3(iTime * 6.0, 0.0, 0.0))) > 0.25)
+            return materials[0];
+        else
+            return materials[1];
+    }
+    if(idx == 6)
+    {
+        if(abs(snoise(position + vec3(iTime * 1.0, 0.0, 0.0))) > 0.1)
+            return materials[0];
+        else
+            return materials[3];
+    }
+    if(idx == 7)
+    {
+        float noiz = abs(pow(snoise(position), 2.0));
+        return Material(vec3(1.0, 1.0, 1.0), 0.0, noiz);
+    }
     return materials[idx];
 }
 
@@ -262,21 +415,23 @@ vec3 applyLighting(in vec3 position, in vec3 normal, int objectID)
     return vec3(max(dot(normal, light), 0.0));
 }
 
-vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID, uint seed)
+vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID, inout uint seed)
 {    
     vec3 ref = reflect(incident, normal);
     Sphere sphere = spheres[objectID];
-    Material material = materials[sphere.material];
+    Material material = getMaterial(position, objectID);
     return normalize(RandomUnitSphere(seed) * material.roughness + ref);
-
-    //return normalize(RandomUnitSphere(seed) + normal);
-
-    //return RandomVec3(seed);
-    // return RandomUnitSphere(seed);  
+  
     return ref;
-    //return cosineDirection2(seed, normal);
-    }
+}
 
+vec3 GetHemisphereVector(in vec3 normal, inout uint seed)
+{
+    vec3 r = RandomUnitSphere(seed);
+    if(dot(normal, r) < 0.0)
+        return -r;
+    return r;
+}
 
 // create light paths iteratively
 vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
@@ -295,23 +450,27 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
         
         // get position and normal at the intersection point
         vec3 pos = ray.origin + ray.direction * intersection.distance;
-        vec3 nor = getNormal(pos, intersection.objectID);
+        vec3 normal = getNormal(pos, intersection.objectID);
         
         // get color for the surface
         Material material = getMaterial(pos, intersection.objectID);
 
         // compute direct lighting
-        //vec3 dcol = applyLighting(pos, nor, intersection.objectID);
-        // tcol = dcol;
         vec3 emmisive = material.emmisive * material.color;
 
+        float ND = dot(ray.direction, normal);
+
         // prepare ray for indirect lighting gathering
-        ray.origin = pos + nor * 0.01;
-        ray.direction = getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
+        ray.origin = pos + normal * 0.01;
+        //ray.direction = GetHemisphereVector(normal, seed); //getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
+        ray.direction = getBRDFRay(pos, normal, ray.direction, intersection.objectID, seed);
+
+        //float ND = dot(ray.direction, normal);
 
         // surface * lighting
-        mask *= material.color;
+        mask *= material.color; // * ND * (4.0 / 3.14);
         accumulator += mask * emmisive;
+        //mask *= material.color * ND * (4.0 / 3.14);
     }
 
     return accumulator;
@@ -324,9 +483,9 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord)
     float width = iResolution.x;
     float height = iResolution.y;
     
-    float cx = sin(iTime * 2.0) * 10.0;
+    float cx = sin(iTime * 1.0) * 10.0;
     float cy = 1.0;
-    float cz = cos(iTime * 2.0) * 10.0; 
+    float cz = cos(iTime * 1.0) * 10.0; 
 
     Camera camera = MakeCamera(
         vec3(cx, cy, cz),
@@ -334,21 +493,20 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord)
         vec3(0.0, 0.1, 0.0),
         60.0, 1.6);
 
-    vec3 sa = hash( uvec3(x, y, iTime * 100.0) );
+    vec3 sa = hash( uvec3(x, y, iTime * 60.0) );
     uint seed = (uint(x) + uint(y) * uint(width)) ^ uint(iTime * 10000000.0);
     seed = WangHash(seed);
 
     vec3 color = vec3(0.0);
-    const int samples = 128;
-    for( int i = 0; i < samples; i++)
+    for( int i = 0; i < SAMPLES; i++)
     {
         float xs = x + RandomFloat(seed) + 0.5;
         float ys = y + RandomFloat(seed) + 0.5;
         Ray ray = MakeRay(camera, xs / width, 1.0 - (ys / height));
-        color += rendererCalculateColor(ray, 4, seed);
+        color += rendererCalculateColor(ray, BOUNCES, seed);
         seed += uint(hash(float(i)) * 100.0);
     }
-    color /= float(samples);
+    color /= float(SAMPLES);
 
     fragColor = vec4(pow(color, vec3(0.45)), 1.0);
 }
