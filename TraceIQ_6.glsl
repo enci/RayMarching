@@ -216,6 +216,7 @@ vec3 RandomUnitSphere(inout uint s)
     return normalize(v);
 }
 
+/*
 #define MATERIAL_COUNT 10
 const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
 	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey    0
@@ -229,20 +230,21 @@ const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
     , Material(vec3(0.0, 0.0, 1.0), 4.9, 1.0)                // Orange  8
     , Material(vec3(1.0, 0.6, 0.0), 5.0, 1.0)                // Blue    9
 );
+*/
 
 #define SPHERE_COUNT 11
 const Sphere spheres[SPHERE_COUNT] = Sphere[SPHERE_COUNT](
-	Sphere(vec3(0.0, 2.0, 0.0), 2.0, 0)                     // Big middle
-	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, 2)                   
-    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, 9)                   // 
-    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 7)          // Bottom
-    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, 2)           // Top
-    , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, 1)
-    , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, 6)
-    , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 0.0, -10009.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 1.0, -4.0), 1.0, 5)
-    , Sphere(vec3(-3.0, 0.7, 0.0), 0.7, 2)
+	  Sphere(vec3(0.0, 2.0, 0.0), 2.0, MAT_WHITE)                       // Big middle
+	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, MAT_WHITE)            
+    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, MAT_WHITE)                       
+    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, MAT_WHITE)              // Bottom
+    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, MAT_LIGHT)               // Top
+    , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, MAT_WHITE)               // Side
+    , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, MAT_WHITE)              // Side
+    , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, MAT_WHITE)               // Side
+    , Sphere(vec3(0.0, 0.0, -10009.0), 10000.0, MAT_WHITE)              // Side
+    , Sphere(vec3(0.0, 1.0, -4.0), 1.0, MAT_WHITE)
+    , Sphere(vec3(-3.0, 0.7, 0.0), 0.7, MAT_WHITE)
 );
 
 const vec3 background = vec3(1.0f, 0.96, 0.92);
@@ -321,7 +323,27 @@ vec3 getNormal(in vec3 position, in int objectID)
 
 Material getMaterial(in vec3 position, in int objectID)
 {
-    int idx = spheres[objectID].material;
+    int mat = spheres[objectID].material;
+    switch(mat)
+    {
+        case MAT_WHITE :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0);
+        }
+        case MAT_LIGHT :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 1.0, 1.0);
+        }
+        case MAT_PIXEL :
+        case MAT_NOISE :
+        case MAT_STRIPES :
+        case MAT_ROUGH :
+        case MAT_WET :
+            break;
+    }
+    
+    /*
+
     if(idx == 0)
     {
         if(sin((position.y + position.z + iTime * 0.9) * 12.0) < 0.5)
@@ -349,12 +371,7 @@ Material getMaterial(in vec3 position, in int objectID)
         return Material(vec3(1.0, 1.0, 1.0), 0.0, noiz);
     }
     return materials[idx];
-}
-
-vec3 getColor(in vec3 position, in int objectID)
-{
-    int idx = spheres[objectID].material;
-    return materials[idx].color;
+    */
 }
 
 vec3 getBackground(in vec3 direction)

@@ -1,9 +1,10 @@
 #version 430 core
 #define FLT_MAX 1000000000.0
 #define EPSILON 0.001
-#define SLOPE_EPSILON 0.001
-#define SAMPLES 64
+#define SLOPE_EPSILON 0.008
+#define SAMPLES 128
 #define BOUNCES 4
+#define COSINE_SAMPLING 1
 
 #define MAT_WHITE           0
 #define MAT_LIGHT           1
@@ -12,6 +13,8 @@
 #define MAT_STRIPES         4
 #define MAT_ROUGH           5
 #define MAT_WET             6
+#define MAT_PULSE           7
+#define MAT_MIRROR          8
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -216,33 +219,19 @@ vec3 RandomUnitSphere(inout uint s)
     return normalize(v);
 }
 
-#define MATERIAL_COUNT 10
-const Material materials[MATERIAL_COUNT] = Material[MATERIAL_COUNT](
-	Material(vec3(0.5, 0.5, 0.5), 0.0, 1.0)                  // Grey    0
-	, Material(vec3(1.20, 1.0, 1.0), 1.0, 1.0)                // Green   1
-    , Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0)                // White   2
-    , Material(vec3(1.0, 1.0, 1.0), 2.6, 1.0)                // Light   3
-    , Material(vec3(1.0, 0.0, 1.0), 1.0, 0.0)                // Pink    4
-    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.3)                // Mirror  5    
-    , Material(vec3(1.0, 0.2, 0.2), 0.0, 1.0)                // Red     6
-    , Material(vec3(1.0, 1.0, 1.0), 0.0, 0.0)                // Grey    7
-    , Material(vec3(0.0, 0.0, 1.0), 4.9, 1.0)                // Orange  8
-    , Material(vec3(1.0, 0.6, 0.0), 5.0, 1.0)                // Blue    9
-);
-
 #define SPHERE_COUNT 11
 const Sphere spheres[SPHERE_COUNT] = Sphere[SPHERE_COUNT](
-	Sphere(vec3(0.0, 2.0, 0.0), 2.0, 0)                     // Big middle
-	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, 2)                   
-    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, 9)                   // 
-    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, 7)          // Bottom
-    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, 2)           // Top
-    , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, 1)
-    , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, 6)
-    , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 0.0, -10009.0), 10000.0, 2)
-    , Sphere(vec3(0.0, 1.0, -4.0), 1.0, 5)
-    , Sphere(vec3(-3.0, 0.7, 0.0), 0.7, 2)
+	  Sphere(vec3(0.0, 2.0, 0.0), 2.0, MAT_STRIPES)                     // Big middle
+	, Sphere(vec3(3.0, 1.0, 0.0), 1.0, MAT_ROUGH)            
+    , Sphere(vec3(0.0, 0.5, 2.6), 0.5, MAT_PULSE)                       
+    , Sphere(vec3(0.0, 1.0, -4.0), 1.0, MAT_MIRROR)
+    , Sphere(vec3(-3.0, 0.7, 0.0), 0.7, MAT_WHITE)
+    , Sphere(vec3(0.0, -10000.0, 0.0), 10000.0, MAT_WET)              // Bottom
+    , Sphere(vec3(0.0, 10009.0, 0.0), 10000.0, MAT_WHITE)               // Top
+    , Sphere(vec3(10009.0, 0.0, 0.0), 10000.0, MAT_PIXEL)               // Side
+    , Sphere(vec3(-10009.0, 0.0, 0.0), 10000.0, MAT_NOISE)              // Side
+    , Sphere(vec3(0.0, 0.0, 10009.0), 10000.0, MAT_WHITE)               // Side
+    , Sphere(vec3(0.0, 0.0, -10009.0), 10000.0, MAT_WHITE)              // Side    
 );
 
 const vec3 background = vec3(1.0f, 0.96, 0.92);
@@ -321,40 +310,60 @@ vec3 getNormal(in vec3 position, in int objectID)
 
 Material getMaterial(in vec3 position, in int objectID)
 {
-    int idx = spheres[objectID].material;
-    if(idx == 0)
+    int mat = spheres[objectID].material;
+    switch(mat)
     {
-        if(sin((position.y + position.z + iTime * 0.9) * 12.0) < 0.5)
-            return materials[5];
-        else
-            return materials[3];
-    }    
-    if(idx == 1)
-    {
-        if(rand3D(round(position + vec3(iTime * 6.0, 0.0, 0.0))) > 0.25)
-            return materials[0];
-        else
-            return materials[1];
+        case MAT_WHITE :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0);
+        }
+        case MAT_LIGHT :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 1.0, 1.0);
+        }
+        case MAT_PIXEL :
+          {
+            if(rand3D(round(position + vec3(iTime * 6.0, 0.0, 0.0))) > 0.70)
+                return Material(vec3(1.20, 1.0, 1.0), 1.0, 1.0);
+            else
+                return Material(vec3(1.0, 1.0, 1.0), 0.0, 0.05);
+        }                
+        case MAT_NOISE : 
+        {
+            //if(abs(snoise(position + vec3(iTime * 1.0, 0.0, 0.0))) < 0.01)
+            //if(rand3D(round(position * 5.0 + vec3(iTime * 6.0, 0.0, 0.0))) > 0.70)
+            if(sin((position.y - position.z + iTime * 2.9) * 4.0) < 0.0)
+                return Material(vec3(1.20, 1.0, 1.0), 1.0, 1.0);
+            else
+                return Material(vec3(1.0, 1.0, 1.0), 0.0, 0.85);
+        }
+        case MAT_STRIPES :
+        {
+            if(sin((position.y + position.z + iTime * 0.9) * 12.0) < 0.0)
+                return Material(vec3(1.20, 1.0, 1.0), 1.0, 1.0);
+            else
+                return Material(vec3(1.0, 1.0, 1.0), 0.0, 1.0);
+        }
+        case MAT_ROUGH :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 0.0, 0.5);
+        }
+        case MAT_WET :
+        {
+            float noiz = abs(pow(snoise(position), 2.0));
+            return Material(vec3(1.0, 1.0, 1.0), 0.0, noiz);            
+        }
+        case MAT_PULSE :
+        {
+            float v = pow(max(sin(iTime * 10.9), 0.0), 3.0);
+            return Material(vec3(v, v, v), 2.0, 1.0);            
+        }
+        case MAT_MIRROR :
+        {
+            return Material(vec3(1.0, 1.0, 1.0), 0.0, 0.0);
+        }
+            break;
     }
-    if(idx == 6)
-    {
-        if(abs(snoise(position + vec3(iTime * 1.0, 0.0, 0.0))) > 0.1)
-            return materials[0];
-        else
-            return materials[3];
-    }
-    if(idx == 7)
-    {
-        float noiz = abs(pow(snoise(position), 2.0));
-        return Material(vec3(1.0, 1.0, 1.0), 0.0, noiz);
-    }
-    return materials[idx];
-}
-
-vec3 getColor(in vec3 position, in int objectID)
-{
-    int idx = spheres[objectID].material;
-    return materials[idx].color;
 }
 
 vec3 getBackground(in vec3 direction)
@@ -429,9 +438,9 @@ vec3 getBRDFRay(in vec3 position, in vec3 normal, in vec3 incident, int objectID
     vec3 ref = reflect(incident, normal);
     Sphere sphere = spheres[objectID];
     Material material = getMaterial(position, objectID);
+    vec3 offset = mix(ref, normal, material.roughness);
+    //return normalize(RandomUnitSphere(seed) * material.roughness + offset);
     return normalize(RandomUnitSphere(seed) * material.roughness + ref);
-  
-    return ref;
 }
 
 vec3 GetHemisphereVector(in vec3 normal, inout uint seed)
@@ -454,7 +463,7 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
         Intersection intersection = intersect(ray);
         
         // if nothing found, return background color or break
-        if(intersection.distance <= 0.01) 
+        if(intersection.distance <= 0.0) 
             break;
         
         // get position and normal at the intersection point
@@ -467,19 +476,24 @@ vec3 rendererCalculateColor(Ray ray, in int bounces, uint seed)
         // compute direct lighting
         vec3 emmisive = material.emmisive * material.color;
 
-        float ND = dot(ray.direction, normal);
-
-        // prepare ray for indirect lighting gathering
-        ray.origin = pos + normal * 0.01;
-        //ray.direction = GetHemisphereVector(normal, seed); //getBRDFRay(pos, nor, ray.direction, intersection.objectID, seed);
-        ray.direction = getBRDFRay(pos, normal, ray.direction, intersection.objectID, seed);
-
-        //float ND = dot(ray.direction, normal);
+        // prepare ray for indirect lighting gathering        
+#ifdef COSINE_SAMPLING
+        vec3 dir = getBRDFRay(pos, normal, ray.direction, intersection.objectID, seed);        
+#else   
+        vec3 dir = GetHemisphereVector(normal, seed);     
+#endif
+        ray.direction = dir;
+        float ND = max(dot(ray.direction, normal), 0.0);
+        ray.origin = pos + normal * (1.0 - pow(ND, 2.0)) * SLOPE_EPSILON;
 
         // surface * lighting
-        mask *= material.color; // * ND * (4.0 / 3.14);
+#ifdef COSINE_SAMPLING
+        mask *= material.color;
+#else   
+        mask *= material.color * ND * (3.14 / 2.0);             
+#endif
+
         accumulator += mask * emmisive;
-        //mask *= material.color * ND * (4.0 / 3.14);
     }
 
     return accumulator;
